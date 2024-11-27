@@ -31,9 +31,9 @@ const connectToPeer = (target) => {
 
 // Listen for incoming messages
 client.on('message', (msg, rinfo) => {
+  console.log(`Received message from ${rinfo.address}:${rinfo.port}: ${msg}`);
   try {
     const message = JSON.parse(msg.toString());
-    console.log(`Message received from ${rinfo.address}:${rinfo.port} - ${JSON.stringify(message)}`);
 
     if (message.type === 'target-info' || message.type === 'peer-info') {
       peerAddress = message.address;
@@ -41,11 +41,13 @@ client.on('message', (msg, rinfo) => {
       console.log(`Connected to peer: ${peerAddress}:${peerPort}`);
       console.log('You can now start chatting!');
 
-      // Send an initial punch-through packet
-      const punchMessage = JSON.stringify({ type: 'punch', data: 'hello' });
-      client.send(punchMessage, peerPort, peerAddress, (err) => {
-        if (err) console.error('Error punching hole:', err);
-      });
+      // Send initial punch-through packets
+      for (let i = 0; i < 5; i++) {
+        const punchMessage = JSON.stringify({ type: 'punch', data: 'hello' });
+        client.send(punchMessage, peerPort, peerAddress, (err) => {
+          if (err) console.error('Error punching hole:', err);
+        });
+      }
     } else if (message.type === 'chat') {
       console.log(`Peer: ${message.data}`);
     } else {
@@ -55,6 +57,7 @@ client.on('message', (msg, rinfo) => {
     console.error('Error processing incoming message:', err);
   }
 });
+
 
 // Command-line interface for chat
 rl.question('Enter your name: ', (name) => {
