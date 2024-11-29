@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "nat-upnp": "^1.1.1",
+    "node-stun": "^0.1.2"
+  }
+}
