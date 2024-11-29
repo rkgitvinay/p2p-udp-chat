@@ -1,102 +1,90 @@
 const dgram = require('dgram');
 const readline = require('readline');
-const SimplePeer = require('simple-peer');
-const wrtc = require('wrtc');
+const { multiaddr } = require('@multiformats/multiaddr');
 
-const client = dgram.createSocket('udp4');
+// UDP socket setup
+const socket = dgram.createSocket('udp4');
+
+// Command-line interface setup
 const rl = readline.createInterface({
   input: process.stdin,
   output: process.stdout,
 });
 
-const signalingServer = { address: '144.24.127.147', port: 5000 }; // Replace with your server's public IP
-let peer; // Will hold the simple-peer instance
-let isInitiator = false;
+// Multiaddress signaling server and peer variables
+const signalingServerAddr = multiaddr('/ip4/144.24.127.147/udp/5000');
+let peerMultiaddr = null; // Stores the peer's multiaddress
 
-// Register with signaling server
+// Extract address and port from a multiaddress
+const parseMultiaddr = (ma) => ma.toOptions();
+
+// Register with the signaling server
 const registerWithServer = (name) => {
   const message = JSON.stringify({ type: 'register', name });
-  client.send(message, signalingServer.port, signalingServer.address, (err) => {
-    if (err) console.error('Error sending registration:', err);
+  const { host, port } = parseMultiaddr(signalingServerAddr);
+  socket.send(message, port, host, (err) => {
+    if (err) console.error('Error registering with server:', err);
     else console.log('Registered with signaling server.');
   });
 };
 
-// Request connection to target peer
+// Connect to a target peer
 const connectToPeer = (target) => {
   const message = JSON.stringify({ type: 'connect', target });
-  client.send(message, signalingServer.port, signalingServer.address, (err) => {
-    if (err) console.error('Error requesting connection:', err);
-    else {
-      console.log(`Requested connection to ${target}`);
-      isInitiator = true; // This peer initiates the connection
-    }
-  });
-};
-
-// Send signaling data to signaling server
-const sendSignalingData = (data) => {
-  const message = JSON.stringify({ type: 'signal', data });
-  client.send(message, signalingServer.port, signalingServer.address, (err) => {
-    if (err) console.error('Error sending signaling data:', err);
+  const { host, port } = parseMultiaddr(signalingServerAddr);
+  socket.send(message, port, host, (err) => {
+    if (err) console.error('Error requesting peer connection:', err);
+    else console.log(`Requested connection to peer: ${target}`);
   });
 };
 
 // Handle incoming messages
-client.on('message', (msg, rinfo) => {
+socket.on('message', (msg, rinfo) => {
   try {
     const message = JSON.parse(msg.toString());
+    console.log(`Received message from ${rinfo.address}:${rinfo.port}:`, message);
 
     if (message.type === 'peer-info') {
-      console.log('Peer info received. Setting up WebRTC connection...');
-      setupPeer(message.address, message.port);
-    } else if (message.type === 'signal') {
-      console.log('Received signaling data from peer.');
-      peer.signal(message.data);
+      // Received peer address
+      peerMultiaddr = multiaddr(message.multiaddr);
+      console.log(`Peer address received: ${peerMultiaddr.toString()}`);
+      console.log('You can now start chatting!');
+
+      // Send an initial punch-through packet
+      const punchMessage = JSON.stringify({ type: 'punch', data: 'hello' });
+      const { host, port } = parseMultiaddr(peerMultiaddr);
+      socket.send(punchMessage, port, host, (err) => {
+        if (err) console.error('Error sending punch message:', err);
+      });
+    } else if (message.type === 'chat') {
+      // Handle chat messages
+      console.log(`Peer: ${message.data}`);
+    } else {
+      console.log(`Unknown message type: ${message.type}`);
     }
   } catch (err) {
     console.error('Error processing incoming message:', err);
   }
 });
 
-// Set up WebRTC connection using simple-peer
-const setupPeer = (peerAddress, peerPort) => {
-  peer = new SimplePeer({
-    initiator: isInitiator,
-    trickle: false, // Disable trickling ICE candidates for simplicity
-    wrtc, // Use the wrtc package to support Node.js
-  });
-
-  // Handle generated signaling data
-  peer.on('signal', (data) => {
-    console.log('Generated signaling data:', data);
-    sendSignalingData(data);
-  });
-
-  // Handle connection established
-  peer.on('connect', () => {
-    console.log('WebRTC connection established. You can now chat!');
-    rl.on('line', (line) => {
-      peer.send(line); // Send chat messages over WebRTC
-    });
-  });
-
-  // Handle incoming messages
-  peer.on('data', (data) => {
-    console.log(`Peer: ${data.toString()}`);
-  });
-
-  // Handle connection errors
-  peer.on('error', (err) => {
-    console.error('WebRTC connection error:', err);
-  });
-};
-
-// Start command-line interface
+// Command-line interface for user input
 rl.question('Enter your name: ', (name) => {
   registerWithServer(name);
 
   rl.question('Enter target peer name: ', (target) => {
     connectToPeer(target);
+
+    rl.on('line', (line) => {
+      if (peerMultiaddr) {
+        // Send chat message to peer
+        const chatMessage = JSON.stringify({ type: 'chat', data: line });
+        const { host, port } = parseMultiaddr(peerMultiaddr);
+        socket.send(chatMessage, port, host, (err) => {
+          if (err) console.error('Error sending chat message:', err);
+        });
+      } else {
+        console.log('Peer not connected yet.');
+      }
+    });
   });
 });
