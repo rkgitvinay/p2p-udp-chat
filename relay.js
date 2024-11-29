@@ -1,34 +1,43 @@
-const dgram = require('dgram');
+import dgram from 'dgram';
+import { multiaddr } from '@multiformats/multiaddr';
+
 const server = dgram.createSocket('udp4');
 
 const peers = {};
 
 server.on('message', (msg, rinfo) => {
-  const message = JSON.parse(msg.toString());
-  
-  if (message.type === 'register') {
-    // Register the peer
-    peers[message.name] = { address: rinfo.address, port: rinfo.port };
-    console.log(`Registered ${message.name} at ${rinfo.address}:${rinfo.port}`);
-  } else if (message.type === 'connect') {
-    const target = peers[message.target];
-    if (target) {
-      // Send target info to the requester
-      const targetInfo = JSON.stringify({
-        type: 'target-info',
-        address: target.address,
-        port: target.port,
-      });
-      server.send(targetInfo, rinfo.port, rinfo.address);
+  try {
+    const message = JSON.parse(msg.toString());
 
-      // Send requester info to the target
-      const requesterInfo = JSON.stringify({
-        type: 'peer-info',
-        address: rinfo.address,
-        port: rinfo.port,
-      });
-      server.send(requesterInfo, target.port, target.address);
+    if (message.type === 'register') {
+      // Register the peer using multiaddress
+      const peerMultiaddr = multiaddr(`/ip4/${rinfo.address}/udp/${rinfo.port}`);
+      peers[message.name] = peerMultiaddr;
+      console.log(`Registered ${message.name} at ${peerMultiaddr.toString()}`);
+    } else if (message.type === 'connect') {
+      const targetMultiaddr = peers[message.target];
+      if (targetMultiaddr) {
+        // Send target info to the requester
+        const targetInfo = JSON.stringify({
+          type: 'target-info',
+          multiaddr: targetMultiaddr.toString(),
+        });
+        server.send(targetInfo, rinfo.port, rinfo.address);
+
+        // Send requester info to the target
+        const requesterMultiaddr = multiaddr(`/ip4/${rinfo.address}/udp/${rinfo.port}`);
+        const requesterInfo = JSON.stringify({
+          type: 'peer-info',
+          multiaddr: requesterMultiaddr.toString(),
+        });
+        const targetOptions = targetMultiaddr.toOptions(); // Extract IP and port
+        server.send(requesterInfo, targetOptions.port, targetOptions.host);
+      } else {
+        console.error(`Target ${message.target} not found`);
+      }
     }
+  } catch (err) {
+    console.error('Error processing message:', err.message);
   }
 });
 
