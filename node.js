@@ -1,6 +1,6 @@
-const dgram = require('dgram');
-const readline = require('readline');
-const { multiaddr } = require('@multiformats/multiaddr');
+import dgram from 'dgram';
+import readline from 'readline';
+import { multiaddr } from '@multiformats/multiaddr';
 
 // UDP socket setup
 const socket = dgram.createSocket('udp4');
