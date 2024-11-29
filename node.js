@@ -1,5 +1,6 @@
 const dgram = require('dgram');
 const readline = require('readline');
+const SimplePeer = require('simple-peer');
 
 const client = dgram.createSocket('udp4');
 const rl = readline.createInterface({
@@ -7,11 +8,11 @@ const rl = readline.createInterface({
   output: process.stdout,
 });
 
-const signalingServer = { address: '144.24.127.147', port: 5000 }; // Replace with your signaling server's public IP
-let peerAddress = null;
-let peerPort = null;
+const signalingServer = { address: '144.24.127.147', port: 5000 }; // Replace with your server's public IP
+let peer; // Will hold the simple-peer instance
+let isInitiator = false;
 
-// Register with the signaling server
+// Register with signaling server
 const registerWithServer = (name) => {
   const message = JSON.stringify({ type: 'register', name });
   client.send(message, signalingServer.port, signalingServer.address, (err) => {
@@ -25,59 +26,75 @@ const connectToPeer = (target) => {
   const message = JSON.stringify({ type: 'connect', target });
   client.send(message, signalingServer.port, signalingServer.address, (err) => {
     if (err) console.error('Error requesting connection:', err);
-    else console.log(`Requested connection to ${target}`);
+    else {
+      console.log(`Requested connection to ${target}`);
+      isInitiator = true; // This peer initiates the connection
+    }
   });
 };
 
-// Listen for incoming messages
+// Send signaling data to signaling server
+const sendSignalingData = (data) => {
+  const message = JSON.stringify({ type: 'signal', data });
+  client.send(message, signalingServer.port, signalingServer.address, (err) => {
+    if (err) console.error('Error sending signaling data:', err);
+  });
+};
+
+// Handle incoming messages
 client.on('message', (msg, rinfo) => {
-  console.log(`Received message from ${rinfo.address}:${rinfo.port}: ${msg}`);
   try {
     const message = JSON.parse(msg.toString());
 
-    if (message.type === 'target-info' || message.type === 'peer-info') {
-      peerAddress = message.address;
-      peerPort = message.port;
-      console.log(`Connected to peer: ${peerAddress}:${peerPort}`);
-      console.log('You can now start chatting!');
-
-      // Send initial punch-through packets
-      for (let i = 0; i < 5; i++) {
-        const punchMessage = JSON.stringify({ type: 'punch', data: 'hello' });
-        client.send(punchMessage, peerPort, peerAddress, (err) => {
-          if (err) console.error('Error punching hole:', err);
-        });
-      }
-    } else if (message.type === 'chat') {
-      console.log(`Peer: ${message.data}`);
-    } else {
-      console.log(`Unknown message type: ${message.type}`);
+    if (message.type === 'peer-info') {
+      console.log('Peer info received. Setting up WebRTC connection...');
+      setupPeer(message.address, message.port);
+    } else if (message.type === 'signal') {
+      console.log('Received signaling data from peer.');
+      peer.signal(message.data);
     }
   } catch (err) {
     console.error('Error processing incoming message:', err);
   }
 });
 
+// Set up WebRTC connection using simple-peer
+const setupPeer = (peerAddress, peerPort) => {
+  peer = new SimplePeer({
+    initiator: isInitiator,
+    trickle: false, // Disable trickling ICE candidates for simplicity
+  });
 
-// Command-line interface for chat
+  // Handle generated signaling data
+  peer.on('signal', (data) => {
+    console.log('Generated signaling data:', data);
+    sendSignalingData(data);
+  });
+
+  // Handle connection established
+  peer.on('connect', () => {
+    console.log('WebRTC connection established. You can now chat!');
+    rl.on('line', (line) => {
+      peer.send(line); // Send chat messages over WebRTC
+    });
+  });
+
+  // Handle incoming messages
+  peer.on('data', (data) => {
+    console.log(`Peer: ${data.toString()}`);
+  });
+
+  // Handle connection errors
+  peer.on('error', (err) => {
+    console.error('WebRTC connection error:', err);
+  });
+};
+
+// Start command-line interface
 rl.question('Enter your name: ', (name) => {
   registerWithServer(name);
 
   rl.question('Enter target peer name: ', (target) => {
     connectToPeer(target);
-
-    // Enable chat after connection
-    rl.on('line', (line) => {
-      if (peerAddress && peerPort) {
-        // Send chat message to peer
-        const chatMessage = JSON.stringify({ type: 'chat', data: line });
-        console.log(`Sending message to ${peerAddress}:${peerPort} - ${line}`);
-        client.send(chatMessage, peerPort, peerAddress, (err) => {
-          if (err) console.error('Error sending message:', err);
-        });
-      } else {
-        console.log('Waiting for connection to peer...');
-      }
-    });
   });
 });
