@@ -1,6 +1,7 @@
 const dgram = require('dgram');
 const readline = require('readline');
 const SimplePeer = require('simple-peer');
+const wrtc = require('wrtc');
 
 const client = dgram.createSocket('udp4');
 const rl = readline.createInterface({
@@ -63,6 +64,7 @@ const setupPeer = (peerAddress, peerPort) => {
   peer = new SimplePeer({
     initiator: isInitiator,
     trickle: false, // Disable trickling ICE candidates for simplicity
+    wrtc, // Use the wrtc package to support Node.js
   });
 
   // Handle generated signaling data
